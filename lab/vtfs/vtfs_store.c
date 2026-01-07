@@ -1,13 +1,14 @@
 #include "vtfs.h"
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/errno.h>
 
 static struct vtfs_fs *vtfs_fs(struct super_block *sb)
 {
 	return (struct vtfs_fs *)sb->s_fs_info;
 }
 
-static unsigned long vtfs_next_ino(struct super_block *sb)
+static ino_t vtfs_next_ino(struct super_block *sb)
 {
 	struct vtfs_fs *fs = vtfs_fs(sb);
 	return fs->next_ino++;
@@ -34,8 +35,8 @@ static struct vtfs_node *vtfs_node_alloc(struct super_block *sb,
 	n->ino = vtfs_next_ino(sb);
 	n->parent = parent;
 
-	INIT_LIST_HEAD(&n->siblings);
 	INIT_LIST_HEAD(&n->children);
+	INIT_LIST_HEAD(&n->siblings);
 
 	return n;
 }
@@ -62,24 +63,30 @@ int vtfs_store_init(struct super_block *sb)
 		return -ENOMEM;
 
 	mutex_init(&fs->lock);
-	fs->next_ino = 1000; /* start from something readable */
+	fs->next_ino = 1001;
 
-	/* create root node */
+	/* выставляем сразу, иначе vtfs_next_ino() упадёт */
+	sb->s_fs_info = fs;
+
 	fs->root = vtfs_node_alloc(sb, NULL, "", S_IFDIR | 0777);
 	if (!fs->root) {
+		sb->s_fs_info = NULL;
 		kfree(fs);
 		return -ENOMEM;
 	}
 
-	/* root ino fixed-ish */
+	/* фиксируем корень */
+	fs->root->ino = 1000;
+	fs->root->mode = S_IFDIR | 0777;
+	fs->root->parent = NULL;
 
-	sb->s_fs_info = fs;
 	return 0;
 }
 
 void vtfs_store_destroy(struct super_block *sb)
 {
 	struct vtfs_fs *fs = vtfs_fs(sb);
+
 	if (!fs)
 		return;
 
@@ -133,17 +140,15 @@ struct vtfs_node *vtfs_store_create(struct super_block *sb,
 	if (!fs || !parent || !vtfs_is_dir(parent))
 		return NULL;
 
-	/* disallow special names */
 	if (!name || !*name || !strcmp(name, ".") || !strcmp(name, ".."))
 		return NULL;
 
 	mutex_lock(&fs->lock);
 
-	/* already exists? */
 	list_for_each_entry(child, &parent->children, siblings) {
 		if (!strcmp(child->name, name)) {
 			mutex_unlock(&fs->lock);
-			return NULL;
+			return NULL; /* exists */
 		}
 	}
 
