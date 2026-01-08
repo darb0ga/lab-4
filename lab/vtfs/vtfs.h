@@ -14,9 +14,11 @@ struct vtfs_node {
 	ino_t ino;
 
 	struct vtfs_node *parent;
-
 	struct list_head children;
 	struct list_head siblings;
+
+	char *data;
+	size_t size;
 };
 
 struct vtfs_fs {

@@ -19,9 +19,8 @@ struct inode *vtfs_inode_from_node(struct super_block *sb, struct vtfs_node *nod
 		return NULL;
 
 	mode = vtfs_force_mode(node->mode);
-	node->mode = mode; /* чтобы store и vfs видели одинаковое */
-
-	/* В новых ядрах нужен mnt_idmap */
+	node->mode = mode;
+	
 	inode_init_owner(&nop_mnt_idmap, inode, NULL, mode);
 	inode->i_mode = mode;
 
@@ -35,7 +34,6 @@ struct inode *vtfs_inode_from_node(struct super_block *sb, struct vtfs_node *nod
 		inode->i_fop = &vtfs_dir_fops;
 		set_nlink(inode, 2); /* . and .. */
 	} else {
-		inode->i_op  = &vtfs_file_iops;
 		inode->i_fop = &vtfs_file_fops;
 		set_nlink(inode, 1);
 	}
