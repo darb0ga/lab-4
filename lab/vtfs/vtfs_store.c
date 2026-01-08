@@ -3,7 +3,7 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 
-static struct vtfs_fs *vtfs_fs(struct super_block *sb)
+struct vtfs_fs *vtfs_fs(struct super_block *sb)
 {
 	return (struct vtfs_fs *)sb->s_fs_info;
 }
@@ -34,6 +34,7 @@ static struct vtfs_node *vtfs_node_alloc(struct super_block *sb,
 	n->mode = mode;
 	n->ino = vtfs_next_ino(sb);
 	n->parent = parent;
+	n->nlink = 1;
 
 	INIT_LIST_HEAD(&n->children);
 	INIT_LIST_HEAD(&n->siblings);
@@ -65,7 +66,6 @@ int vtfs_store_init(struct super_block *sb)
 	mutex_init(&fs->lock);
 	fs->next_ino = 1001;
 
-	/* выставляем сразу, иначе vtfs_next_ino() упадёт */
 	sb->s_fs_info = fs;
 
 	fs->root = vtfs_node_alloc(sb, NULL, "", S_IFDIR | 0777);
@@ -74,8 +74,7 @@ int vtfs_store_init(struct super_block *sb)
 		kfree(fs);
 		return -ENOMEM;
 	}
-
-	/* фиксируем корень */
+	
 	fs->root->ino = 1000;
 	fs->root->mode = S_IFDIR | 0777;
 	fs->root->parent = NULL;
@@ -164,6 +163,7 @@ struct vtfs_node *vtfs_store_create(struct super_block *sb,
 	return child;
 }
 
+
 int vtfs_store_unlink(struct super_block *sb,
                       struct vtfs_node *parent,
                       const char *name)
@@ -175,20 +175,24 @@ int vtfs_store_unlink(struct super_block *sb,
 		return -ENOENT;
 
 	mutex_lock(&fs->lock);
+
 	list_for_each_entry_safe(child, tmp, &parent->children, siblings) {
 		if (!strcmp(child->name, name)) {
 			if (vtfs_is_dir(child)) {
 				mutex_unlock(&fs->lock);
 				return -EISDIR;
 			}
+			child->nlink--;
 			list_del(&child->siblings);
-			vtfs_node_free_recursive(child);
+
+			if (child->nlink == 0) {
+				vtfs_node_free_recursive(child);
+			}
 			mutex_unlock(&fs->lock);
 			return 0;
 		}
 	}
 	mutex_unlock(&fs->lock);
-
 	return -ENOENT;
 }
 

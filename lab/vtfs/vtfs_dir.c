@@ -2,13 +2,7 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 
-static struct vtfs_fs *vtfs_fs(struct super_block *sb)
-{
-	return (struct vtfs_fs *)sb->s_fs_info;
-}
-
-
-static struct dentry *vtfs_lookup(struct inode *dir_inode,
+struct dentry *vtfs_lookup(struct inode *dir_inode,
                                   struct dentry *dentry,
                                   unsigned int flags)
 {
@@ -76,7 +70,7 @@ static int vtfs_iterate(struct file *file, struct dir_context *ctx)
 }
 
 
-static int vtfs_create(struct mnt_idmap *idmap,
+int vtfs_create(struct mnt_idmap *idmap,
                        struct inode *dir_inode,
                        struct dentry *dentry,
                        umode_t mode,
@@ -93,7 +87,7 @@ static int vtfs_create(struct mnt_idmap *idmap,
 	if (!dir || !vtfs_is_dir(dir))
 		return -ENOTDIR;
 
-	mode = S_IFREG | 0777; /* форсим как в ТЗ */
+	mode = S_IFREG | 0777;
 
 	node = vtfs_store_create(sb, dir, dentry->d_name.name, mode);
 	if (!node)
@@ -107,7 +101,7 @@ static int vtfs_create(struct mnt_idmap *idmap,
 	return 0;
 }
 
-static int vtfs_unlink(struct inode *dir_inode, struct dentry *dentry)
+int vtfs_unlink(struct inode *dir_inode, struct dentry *dentry)
 {
 	struct super_block *sb = dir_inode->i_sb;
 	struct vtfs_node *dir = dir_inode->i_private;
@@ -171,6 +165,7 @@ const struct inode_operations vtfs_dir_iops = {
 	.unlink = vtfs_unlink,
 	.mkdir  = vtfs_mkdir,
 	.rmdir  = vtfs_rmdir,
+	.link   = vtfs_link,
 };
 
 const struct file_operations vtfs_dir_fops = {
