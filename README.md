@@ -1,9 +1,6 @@
 # OS Course
 
-Repository for the ITMO CSE OS course.
-
-## Содержание
+Repository for the 4th ITMO CSE OS course's task.
 
 - [ПЛР4: Файловая система](./lab/vtfs/README.md)
 
-- [Порядок сдачи ЛР](./doc/process.md)
