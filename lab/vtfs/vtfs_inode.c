@@ -27,7 +27,17 @@ struct inode *vtfs_inode_from_node(struct super_block *sb, struct vtfs_node *nod
 	inode->i_ino = node->ino;
 	inode_set_ctime_current(inode);
 
-	inode->i_private = node;
+	if (S_ISDIR(mode)) {
+		inode->i_private = node;
+		inode->i_op  = &vtfs_dir_iops;
+		inode->i_fop = &vtfs_dir_fops;
+		set_nlink(inode, 2);
+	} else {
+		inode->i_private = node->f;     
+		inode->i_fop = &vtfs_file_fops;
+		set_nlink(inode, 1);
+	}
+
 
 	if (S_ISDIR(mode)) {
 		inode->i_op  = &vtfs_dir_iops;
@@ -44,23 +54,28 @@ int vtfs_link(struct dentry *old_dentry,
               struct inode *parent_dir,
               struct dentry *new_dentry)
 {
-	struct inode *inode = d_inode(old_dentry);
-	struct vtfs_node *node = inode->i_private;
-	struct vtfs_node *parent = parent_dir->i_private;
+    struct super_block *sb = parent_dir->i_sb;
+    struct vtfs_node *parent = parent_dir->i_private;
+    struct vtfs_node *target;
+    int ret;
 
-	if (!node || !parent)
-		return -EINVAL;
+    if (!parent)
+        return -EINVAL;
 
-	if (!S_ISREG(node->mode))
-		return -EPERM;
+    target = vtfs_store_lookup(sb, parent, old_dentry->d_name.name);
+    if (!target)
+        return -ENOENT;
 
-	mutex_lock(&vtfs_fs(parent_dir->i_sb)->lock);
+    if (!S_ISREG(target->mode))
+        return -EPERM;
 
-	inc_nlink(inode);
-	ihold(inode);
-	d_add(new_dentry, inode);
+    ret = vtfs_store_link(sb, parent, new_dentry->d_name.name, target);
+    if (ret)
+        return ret;
 
-	mutex_unlock(&vtfs_fs(parent_dir->i_sb)->lock);
+    inc_nlink(d_inode(old_dentry));
+    ihold(d_inode(old_dentry));
+    d_add(new_dentry, d_inode(old_dentry));
 
-	return 0;
+    return 0;
 }

@@ -6,7 +6,13 @@
 #include <linux/mount.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
+#include <linux/atomic.h>
 
+struct vtfs_fileobj {
+	char *data;
+	size_t size;
+	atomic_t refcnt;
+};
 
 struct vtfs_node {
 	char *name;
@@ -16,11 +22,7 @@ struct vtfs_node {
 	struct vtfs_node *parent;
 	struct list_head children;
 	struct list_head siblings;
-
-	char *data;
-	size_t size;
-
-	int nlink;
+	struct vtfs_fileobj *f;
 };
 
 struct vtfs_fs {
@@ -28,11 +30,6 @@ struct vtfs_fs {
 	ino_t next_ino;
 	struct mutex lock;
 };
-
-int vtfs_link(struct dentry *old_dentry,
-              struct inode *dir,
-              struct dentry *new_dentry);
-
 
 static inline bool vtfs_is_dir(const struct vtfs_node *n)
 {
@@ -61,12 +58,14 @@ int vtfs_store_rmdir(struct super_block *sb,
                      struct vtfs_node *parent,
                      const char *name);
 
+int vtfs_store_link(struct super_block *sb,
+                    struct vtfs_node *parent,
+                    const char *name,
+                    struct vtfs_node *target);
+
 extern struct file_system_type vtfs_fs_type;
-
 extern const struct super_operations vtfs_super_ops;
-
 extern const struct inode_operations vtfs_dir_iops;
-
 extern const struct file_operations vtfs_dir_fops;
 extern const struct file_operations vtfs_file_fops;
 
@@ -76,11 +75,11 @@ struct inode *vtfs_inode_from_node(struct super_block *sb,
 int vtfs_fill_super(struct super_block *sb, void *data, int silent);
 
 struct dentry *vtfs_lookup(struct inode *dir,
-                            struct dentry *dentry,
-                            unsigned int flags);
+                           struct dentry *dentry,
+                           unsigned int flags);
 
 int vtfs_create(struct mnt_idmap *idmap,
-				struct inode *dir,
+                struct inode *dir,
                 struct dentry *dentry,
                 umode_t mode,
                 bool excl);

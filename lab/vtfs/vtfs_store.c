@@ -14,6 +14,17 @@ static ino_t vtfs_next_ino(struct super_block *sb)
 	return fs->next_ino++;
 }
 
+static void vtfs_fileobj_put(struct vtfs_fileobj *f)
+{
+	if (!f)
+		return;
+
+	if (atomic_dec_and_test(&f->refcnt)) {
+		kfree(f->data);
+		kfree(f);
+	}
+}
+
 static struct vtfs_node *vtfs_node_alloc(struct super_block *sb,
                                          struct vtfs_node *parent,
                                          const char *name,
@@ -34,7 +45,7 @@ static struct vtfs_node *vtfs_node_alloc(struct super_block *sb,
 	n->mode = mode;
 	n->ino = vtfs_next_ino(sb);
 	n->parent = parent;
-	n->nlink = 1;
+	n->f = NULL;
 
 	INIT_LIST_HEAD(&n->children);
 	INIT_LIST_HEAD(&n->siblings);
@@ -49,6 +60,11 @@ static void vtfs_node_free_recursive(struct vtfs_node *n)
 	list_for_each_entry_safe(child, tmp, &n->children, siblings) {
 		list_del(&child->siblings);
 		vtfs_node_free_recursive(child);
+	}
+
+	if (S_ISREG(n->mode) && n->f) {
+		vtfs_fileobj_put(n->f);
+		n->f = NULL;
 	}
 
 	kfree(n->name);
@@ -74,10 +90,11 @@ int vtfs_store_init(struct super_block *sb)
 		kfree(fs);
 		return -ENOMEM;
 	}
-	
+
 	fs->root->ino = 1000;
 	fs->root->mode = S_IFDIR | 0777;
 	fs->root->parent = NULL;
+	fs->root->f = NULL;
 
 	return 0;
 }
@@ -157,12 +174,24 @@ struct vtfs_node *vtfs_store_create(struct super_block *sb,
 		return NULL;
 	}
 
+	if (S_ISREG(mode)) {
+		child->f = kzalloc(sizeof(*child->f), GFP_KERNEL);
+		if (!child->f) {
+			kfree(child->name);
+			kfree(child);
+			mutex_unlock(&fs->lock);
+			return NULL;
+		}
+		child->f->data = NULL;
+		child->f->size = 0;
+		atomic_set(&child->f->refcnt, 1);
+	}
+
 	list_add_tail(&child->siblings, &parent->children);
 	mutex_unlock(&fs->lock);
 
 	return child;
 }
-
 
 int vtfs_store_unlink(struct super_block *sb,
                       struct vtfs_node *parent,
@@ -182,16 +211,16 @@ int vtfs_store_unlink(struct super_block *sb,
 				mutex_unlock(&fs->lock);
 				return -EISDIR;
 			}
-			child->nlink--;
+
 			list_del(&child->siblings);
 
-			if (child->nlink == 0) {
-				vtfs_node_free_recursive(child);
-			}
+			vtfs_node_free_recursive(child);
+
 			mutex_unlock(&fs->lock);
 			return 0;
 		}
 	}
+
 	mutex_unlock(&fs->lock);
 	return -ENOENT;
 }
@@ -226,4 +255,45 @@ int vtfs_store_rmdir(struct super_block *sb,
 	mutex_unlock(&fs->lock);
 
 	return -ENOENT;
+}
+
+int vtfs_store_link(struct super_block *sb,
+                    struct vtfs_node *parent,
+                    const char *name,
+                    struct vtfs_node *target)
+{
+	struct vtfs_fs *fs = vtfs_fs(sb);
+	struct vtfs_node *n;
+
+	if (!fs || !parent || !vtfs_is_dir(parent))
+		return -ENOTDIR;
+	if (!target || !S_ISREG(target->mode))
+		return -EPERM;
+	if (!name || !*name || !strcmp(name, ".") || !strcmp(name, ".."))
+		return -EINVAL;
+
+	mutex_lock(&fs->lock);
+
+	list_for_each_entry(n, &parent->children, siblings) {
+		if (!strcmp(n->name, name)) {
+			mutex_unlock(&fs->lock);
+			return -EEXIST;
+		}
+	}
+
+	n = vtfs_node_alloc(sb, parent, name, target->mode);
+	if (!n) {
+		mutex_unlock(&fs->lock);
+		return -ENOMEM;
+	}
+
+	n->ino = target->ino;
+	n->f = target->f;
+	if (n->f)
+		atomic_inc(&n->f->refcnt);
+
+	list_add_tail(&n->siblings, &parent->children);
+
+	mutex_unlock(&fs->lock);
+	return 0;
 }
